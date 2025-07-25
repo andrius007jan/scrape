@@ -1,0 +1,83 @@
+name: Deploy to Desktop with Docker Compose
+
+on:
+  push:
+    branches:
+      - main  # Adjust this to your default branch name if it's different (e.g., master)
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: test  # Specify the correct environment here
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Set up SSH key for authentication
+      uses: webfactory/ssh-agent@v0.5.3
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+    - name: Debug SSH details
+      run: |
+        echo "SSH_USER: ${{ secrets.SSH_USER }}"
+        echo "SERVER_IP: ${{ secrets.SERVER_IP }}"
+
+    - name: Generate .env file with all GitHub Actions environment variables
+      run: |
+        echo "Generating .env file with all environment variables"
+        # Create .env file
+        echo "Generating .env file from GitHub Actions environment variables"
+
+        # Loop over all environment variables and write them to the .env file
+        for var in $(printenv | cut -d= -f1); do
+          echo "$var=${!var}" >> .env
+        done
+
+        # Print the .env file (for debugging purposes)
+        cat .env
+
+    - name: Run Deployment on Desktop
+      run: |
+        # Extract the repository name dynamically
+        REPO_NAME=$(basename $GITHUB_REPOSITORY)
+
+        # SSH into the local desktop and deploy the application
+        ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << EOF
+          # Navigate to the Desktop folder
+          cd /home/${{ secrets.SSH_USER }}/Desktop || exit 1
+
+          # If the directory for the repository does not exist, clone the repo
+          if [ ! -d "$REPO_NAME" ]; then
+            echo "Cloning repository..."
+            git clone https://github.com/$GITHUB_REPOSITORY.git $REPO_NAME || exit 1
+          fi
+
+          # Change into the repository directory
+          cd /home/${{ secrets.SSH_USER }}/Desktop/$REPO_NAME || exit 1
+
+          # Move the generated .env file to the correct directory
+          echo "$(< .env)" > .env
+
+          # Print the .env file (for debugging purposes, remove this in production)
+          cat .env
+
+          # Ensure we're in a Git repository before trying to pull
+          if [ ! -d ".git" ]; then
+            echo "Not a Git repository. Please check if the repository is cloned correctly."
+            exit 1
+          fi
+
+          # Pull the latest changes from the repo
+          git pull origin main || exit 1
+
+          # Pull the latest Docker images
+          docker compose pull || exit 1
+
+          # Restart the services
+          docker compose up -d --remove-orphans || exit 1
+
+          # Clean up unused Docker images
+          docker system prune -f || exit 1
+        EOF

@@ -1,0 +1,9 @@
+services:
+  scraping_service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - CONCURRENCY_LIMIT=5
